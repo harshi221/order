@@ -1,0 +1,298 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>BST Traversal — SVG Tree + Animated Steps</title>
+<style>
+  body { font-family: system-ui, Arial; padding: 18px; background:#fafafa; color:#111 }
+  h1 { font-size:20px; margin-bottom:6px }
+  .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px }
+  input[type="text"] { padding:8px; width:320px; border-radius:6px; border:1px solid #ccc }
+  button { padding:8px 12px; border-radius:6px; border:1px solid #888; background:white; cursor:pointer }
+  button:active { transform:translateY(1px) }
+  #canvasWrap { border:1px solid #ddd; background:white; padding:10px; border-radius:8px; }
+  svg { width:100%; height:520px; display:block; }
+
+  .node-circle { fill:#1976d2; stroke:#0b57a4; stroke-width:2; transition: r 0.18s, fill 0.18s, transform 0.18s; }
+  .node-label { fill:white; font-weight:600; font-size:12px; text-anchor:middle; dominant-baseline:middle; pointer-events:none; }
+  .edge-line { stroke:#999; stroke-width:2; stroke-linecap:round; }
+  .edge-highlight { stroke:#ff6d00 !important; stroke-width:4 !important; }
+
+  .highlight { fill:#ff6d00 !important; transform:scale(1.15); }
+  #output { margin-top:10px; font-family:monospace; background:#0f1720; color:#fff; padding:8px; border-radius:6px; min-height:28px }
+  label { font-size:13px }
+  .small { font-size:13px; color:#444 }
+  .speed { width:160px }
+</style>
+</head>
+<body>
+
+<h1>BST Traversal — SVG Tree + Animated Steps</h1>
+<div class="controls">
+  <input id="values" placeholder="Enter integers separated by spaces, e.g. 10 5 15 3 7 12 18" value="10 5 15 3 7 12 18">
+  <button id="buildBtn">Build Tree</button>
+  <button id="inBtn">Animate Inorder</button>
+  <button id="preBtn">Animate Preorder</button>
+  <button id="postBtn">Animate Postorder</button>
+  <button id="playPauseBtn">Play</button>
+  <button id="stepBtn">Step</button>
+  <button id="resetBtn">Reset</button>
+  <label class="small">Speed</label>
+  <input id="speed" class="speed" type="range" min="100" max="2000" value="600">
+  <span id="speedVal" class="small"></span>
+</div>
+
+<div id="canvasWrap">
+  <svg id="svgCanvas" viewBox="0 0 1000 520" preserveAspectRatio="xMidYMid meet"></svg>
+</div>
+
+<div id="output" aria-live="polite"></div>
+
+<script>
+/* ---------- BST data structure with unique node ids ---------- */
+let nodeIdCounter = 0;
+class Node {
+  constructor(val) {
+    this.val = val;
+    this.left = null;
+    this.right = null;
+    this.id = ++nodeIdCounter; // unique id for DOM elements
+    // layout coords
+    this.x = 0;
+    this.y = 0;
+    this.parent = null;
+  }
+}
+class BST {
+  constructor() { this.root = null; }
+  insert(val) {
+    const n = new Node(val);
+    if (!this.root) { this.root = n; return n; }
+    let cur = this.root;
+    while (true) {
+      if (val < cur.val) {
+        if (!cur.left) { cur.left = n; n.parent = cur; break; } else cur = cur.left;
+      } else { // duplicates go to right
+        if (!cur.right) { cur.right = n; n.parent = cur; break; } else cur = cur.right;
+      }
+    }
+    return n;
+  }
+}
+
+/* ---------- layout: assign x using inorder index, y by depth ---------- */
+function assignLayout(root, width=900, startX=50, levelGap=90) {
+  let index = 0;
+  function inorderAssign(node, depth) {
+    if (!node) return;
+    inorderAssign(node.left, depth + 1);
+    index += 1;
+    // map index to x in available width
+    node.x = startX + (index - 1) * (width / Math.max(1, totalNodes - 1 || 1));
+    node.y = 40 + depth * levelGap;
+    inorderAssign(node.right, depth + 1);
+  }
+  // count nodes first
+  function count(n){ if(!n) return 0; return 1+count(n.left)+count(n.right); }
+  totalNodes = count(root) || 1;
+  index = 0;
+  inorderAssign(root, 0);
+}
+
+/* ---------- render SVG ---------- */
+const svg = document.getElementById('svgCanvas');
+function renderTree(root) {
+  svg.innerHTML = '';
+  if (!root) return;
+  // collect nodes for drawing edges first
+  const nodes = [];
+  (function collect(n){ if(!n) return; nodes.push(n); collect(n.left); collect(n.right); })(root);
+
+  // Draw edges (lines) with id: edge-parentid-childid
+  for (const n of nodes) {
+    if (n.left) drawEdge(n, n.left);
+    if (n.right) drawEdge(n, n.right);
+  }
+  // Draw nodes (circles + label)
+  for (const n of nodes) {
+    drawNode(n);
+  }
+}
+
+function drawEdge(parent, child) {
+  const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+  line.setAttribute('x1', parent.x);
+  line.setAttribute('y1', parent.y + 22); // bottom of parent circle
+  line.setAttribute('x2', child.x);
+  line.setAttribute('y2', child.y - 22); // top of child circle
+  line.setAttribute('class', 'edge-line');
+  line.setAttribute('id', `edge-${parent.id}-${child.id}`);
+  svg.appendChild(line);
+}
+
+function drawNode(node) {
+  // group containing circle + text for easier transforms
+  const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+  g.setAttribute('transform', `translate(${node.x}, ${node.y})`);
+  g.setAttribute('id', `nodeg-${node.id}`);
+
+  const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+  c.setAttribute('r', 20);
+  c.setAttribute('class', 'node-circle');
+  c.setAttribute('id', `node-${node.id}`);
+  g.appendChild(c);
+
+  const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+  t.setAttribute('class','node-label');
+  t.textContent = node.val;
+  g.appendChild(t);
+
+  svg.appendChild(g);
+}
+
+/* ---------- Traversal collectors ---------- */
+function inorderList(root, list){ if(!root) return; inorderList(root.left,list); list.push(root); inorderList(root.right,list); }
+function preorderList(root, list){ if(!root) return; list.push(root); preorderList(root.left,list); preorderList(root.right,list); }
+function postorderList(root, list){ if(!root) return; postorderList(root.left,list); postorderList(root.right,list); list.push(root); }
+
+/* ---------- Animation control ---------- */
+let tree = null;
+let sequence = []; // array of nodes in order to highlight
+let currentIndex = -1;
+let playing = false;
+let delay = Number(document.getElementById('speed').value);
+let animationTimer = null;
+
+function resetHighlight() {
+  // clear node highlights
+  document.querySelectorAll('.node-circle').forEach(n => n.classList.remove('highlight'));
+  // clear edge highlights
+  document.querySelectorAll('.edge-line').forEach(l => l.classList.remove('edge-highlight'));
+  document.getElementById('output').textContent = '';
+  currentIndex = -1;
+}
+
+function highlightStep(i) {
+  if (i < 0 || i >= sequence.length) return;
+  const node = sequence[i];
+  // unhighlight previous
+  if (i > 0) {
+    const prev = sequence[i-1];
+    document.getElementById(`node-${prev.id}`).classList.remove('highlight');
+    if (prev.parent) {
+      const linePrev = document.getElementById(`edge-${prev.parent.id}-${prev.id}`);
+      if (linePrev) linePrev.classList.remove('edge-highlight');
+    }
+  }
+  // highlight current node and its incoming edge
+  const circle = document.getElementById(`node-${node.id}`);
+  circle.classList.add('highlight');
+
+  if (node.parent) {
+    const line = document.getElementById(`edge-${node.parent.id}-${node.id}`);
+    if (line) line.classList.add('edge-highlight');
+  }
+  document.getElementById('output').textContent += node.val + ' ';
+  currentIndex = i;
+}
+
+function playSequence() {
+  if (playing) return;
+  if (!sequence || sequence.length === 0) return;
+  playing = true;
+  document.getElementById('playPauseBtn').textContent = 'Pause';
+  function next() {
+    if (!playing) return;
+    if (currentIndex + 1 < sequence.length) {
+      highlightStep(currentIndex + 1);
+      animationTimer = setTimeout(next, delay);
+    } else {
+      playing = false;
+      document.getElementById('playPauseBtn').textContent = 'Play';
+    }
+  }
+  next();
+}
+
+function pauseSequence() {
+  playing = false;
+  clearTimeout(animationTimer);
+  document.getElementById('playPauseBtn').textContent = 'Play';
+}
+
+function stepSequence() {
+  if (!sequence || sequence.length === 0) return;
+  if (currentIndex + 1 < sequence.length) {
+    highlightStep(currentIndex + 1);
+  }
+}
+
+/* ---------- UI wiring ---------- */
+document.getElementById('speed').addEventListener('input', e => {
+  delay = Number(e.target.value);
+  document.getElementById('speedVal').innerText = `${delay} ms`;
+});
+document.getElementById('speedVal').innerText = `${delay} ms`;
+
+document.getElementById('buildBtn').addEventListener('click', () => {
+  buildFromInput();
+});
+document.getElementById('inBtn').addEventListener('click', () => { prepareSequence('inorder'); });
+document.getElementById('preBtn').addEventListener('click', () => { prepareSequence('preorder'); });
+document.getElementById('postBtn').addEventListener('click', () => { prepareSequence('postorder'); });
+
+document.getElementById('playPauseBtn').addEventListener('click', () => {
+  if (!sequence || sequence.length === 0) return;
+  if (playing) pauseSequence(); else playSequence();
+});
+
+document.getElementById('stepBtn').addEventListener('click', () => {
+  if (!sequence || sequence.length === 0) return;
+  stepSequence();
+});
+document.getElementById('resetBtn').addEventListener('click', () => {
+  pauseSequence();
+  resetHighlight();
+});
+
+/* ---------- Build & prepare ---------- */
+function buildFromInput() {
+  pauseSequence();
+  resetHighlight();
+  nodeIdCounter = 0; // reset ids so DOM ids consistent per build
+  tree = new BST();
+  const raw = document.getElementById('values').value.trim();
+  if (!raw) { svg.innerHTML = ''; tree = null; return; }
+  // split by spaces or commas
+  const parts = raw.split(/[\s,]+/).filter(s => s.length);
+  for (const p of parts) {
+    const v = Number(p);
+    if (!Number.isNaN(v)) tree.insert(v);
+  }
+  // layout & render
+  assignLayout(tree.root, 900, 50, 90);
+  renderTree(tree.root);
+  sequence = [];
+  currentIndex = -1;
+  document.getElementById('output').textContent = '';
+}
+
+/* ---------- prepare traversal sequence ---------- */
+function prepareSequence(type) {
+  if (!tree || !tree.root) { alert('Build a tree first'); return; }
+  pauseSequence();
+  resetHighlight();
+  sequence = [];
+  if (type === 'inorder') inorderList(tree.root, sequence);
+  if (type === 'preorder') preorderList(tree.root, sequence);
+  if (type === 'postorder') postorderList(tree.root, sequence);
+  // start playing from first step automatically
+  playSequence();
+}
+
+/* ---------- initial build ---------- */
+buildFromInput();
+
+</script>
+</body>
+</html>
